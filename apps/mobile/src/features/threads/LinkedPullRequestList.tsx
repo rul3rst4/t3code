@@ -83,11 +83,12 @@ export const LinkedPullRequestRow = memo(function LinkedPullRequestRow(props: {
   const { shortLabel, singular } = (
     sourceControlClients.findByChangeRequestUrl(link.url) ?? sourceControlClients.get(undefined)
   ).changeRequest;
+  const repository = sourceControlClients.repositoryLabel(link.repository, link.url);
   const metaLineHeight = useScaledTextRole("label").lineHeight * useWindowDimensions().fontScale;
   const row = (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${capitalizeTerm(singular)} ${link.number}, ${snapshot?.title ?? "waiting for host state"}${status ? `, ${status.label}` : ""}${conflict ? `, ${conflict.label.toLowerCase()}` : ""}, ${link.repository}${stack ? `, stack of ${stack.size}` : ""}${watching ? ", watching" : ""}${checks ? `, checks ${snapshot?.checksState}` : ""}${review ? `, ${review.accessibleLabel}` : ""}`}
+      accessibilityLabel={`${capitalizeTerm(singular)} ${link.number}, ${snapshot?.title ?? "waiting for host state"}${status ? `, ${status.label}` : ""}${conflict ? `, ${conflict.label.toLowerCase()}` : ""}, ${repository}${stack ? `, stack of ${stack.size}` : ""}${watching ? ", watching" : ""}${checks ? `, checks ${snapshot?.checksState}` : ""}${review ? `, ${review.accessibleLabel}` : ""}`}
       accessibilityHint={props.actions ? "Touch and hold for actions." : undefined}
       onPress={() => {
         void props.openPullRequest(link.url).then((opened) => {
@@ -116,7 +117,7 @@ export const LinkedPullRequestRow = memo(function LinkedPullRequestRow(props: {
         <View className="flex-row items-center gap-1.5">
           {snapshot?.author ? <PullRequestAvatar actor={snapshot.author} size={16} /> : null}
           <Text className="min-w-0 shrink text-xs text-foreground-muted" numberOfLines={1}>
-            {link.repository}
+            {repository}
           </Text>
           <Text className="shrink-0 text-xs text-foreground-tertiary">#{link.number}</Text>
           <View className="flex-1" />
@@ -171,7 +172,7 @@ export const LinkedPullRequestRow = memo(function LinkedPullRequestRow(props: {
   return (
     <Menu
       shouldOpenOnLongPress
-      title={`#${link.number} · ${link.repository}`}
+      title={`#${link.number} · ${repository}`}
       actions={actions.menuActions(link)}
       onPressAction={({ nativeEvent }) => actions.onMenuAction(link, nativeEvent.event)}
     >

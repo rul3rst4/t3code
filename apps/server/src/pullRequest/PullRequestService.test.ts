@@ -2090,6 +2090,97 @@ it.effect.each([
   }),
 );
 
+it.effect(
+  "reads an Azure DevOps Server collection's pull requests through any of its checkouts",
+  () =>
+    Effect.gen(function* () {
+      const seen: string[] = [];
+      const service = yield* makeService({
+        projects: [
+          project({
+            id: "portal",
+            title: "portal",
+            workspaceRoot: "/portal",
+            repository: "contoso/shared/_git/portal",
+            provider: SourceControlProviderKind.make("azure-devops"),
+            host: "tfs.example",
+          }),
+        ],
+        providers: [
+          fakePullRequestProvider(SourceControlProviderKind.make("azure-devops"), {
+            ...keyedByCanonicalKey,
+            getChangeRequestSummary: (input) =>
+              Effect.sync(() => {
+                seen.push(`read ${input.cwd} ${input.repository}`);
+                return changeRequest(7, "2026-07-02T00:00:00Z");
+              }),
+            runAction: (input) =>
+              Effect.sync(() => {
+                seen.push(`write ${input.cwd} ${input.repository}`);
+              }),
+          }),
+        ],
+      });
+      const reference = {
+        projectId: "portal" as ProjectId,
+        host: "tfs.example",
+        repository: "contoso/shared/_git/setup",
+        number: 7,
+      };
+      yield* service.summary(reference, { recoverTransientFailure: false });
+      yield* service.runAction({ ...reference, action: "merge" });
+      assert.deepStrictEqual(seen, [
+        "read /portal contoso/shared/_git/setup",
+        "write /portal contoso/shared/_git/setup",
+        "read /portal contoso/shared/_git/setup",
+      ]);
+
+      const otherCollection = { ...reference, repository: "billing/shared/_git/setup" };
+      const refused = yield* Effect.flip(
+        service.summary(otherCollection, { recoverTransientFailure: false }),
+      );
+      assert.strictEqual(refused._tag, "PullRequestUnavailableError");
+    }),
+);
+
+it.effect("lends a legacy-host Azure checkout to its organization's dev.azure.com links", () =>
+  Effect.gen(function* () {
+    const seen: string[] = [];
+    const service = yield* makeService({
+      projects: [
+        project({
+          id: "legacy",
+          title: "legacy",
+          workspaceRoot: "/legacy",
+          repository: "platform/_git/web",
+          provider: SourceControlProviderKind.make("azure-devops"),
+          host: "acme.visualstudio.com",
+        }),
+      ],
+      providers: [
+        fakePullRequestProvider(SourceControlProviderKind.make("azure-devops"), {
+          ...keyedByCanonicalKey,
+          getChangeRequestSummary: (input) =>
+            Effect.sync(() => {
+              seen.push(`read ${input.cwd} ${input.repository}`);
+              return changeRequest(7, "2026-07-02T00:00:00Z");
+            }),
+        }),
+      ],
+    });
+    yield* service.summary(
+      {
+        projectId: "legacy" as ProjectId,
+        host: "dev.azure.com",
+        repository: "acme/platform/_git/api",
+        number: 7,
+      },
+      { recoverTransientFailure: false },
+    );
+    assert.deepStrictEqual(seen, ["read /legacy acme/platform/_git/api"]);
+  }),
+);
+
 it.effect("refuses Azure cross-organization reads and writes without its checkout", () =>
   Effect.gen(function* () {
     const service = yield* makeService({

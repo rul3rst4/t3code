@@ -128,7 +128,7 @@ export function PullRequestEditScreen({ route }: StaticScreenProps<PullRequestEd
     <PullRequestSheetContent
       busy={busy}
       title={title}
-      subtitle={`#${params.number} · ${params.repository}`}
+      subtitle={`#${params.number} · ${sourceControlClients.repositoryLabel(params.repository)}`}
       footer={
         <Button
           fullWidth

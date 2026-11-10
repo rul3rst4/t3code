@@ -1,4 +1,11 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  makeProviderSettingsSchema,
+  SettingsSecretValue,
+  SourceControlProviderKind,
+  TrimmedString,
+} from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import {
   buildCommitUrl,
   changeRequestUrlBelow,
@@ -14,8 +21,16 @@ import { icon } from "./icon.ts";
 const CHANGE_REQUEST_PATH = /^\/((?:[^/]+\/)*_git\/[^/]+)\/pullrequest\/(\d+)(?:\/|$)/u;
 const COMMIT_PATH = /^\/((?:[^/]+\/)*_git\/[^/]+)\/commit\/([0-9a-f]+)\/?$/iu;
 const CHECKOUT_COMMAND = /^az\s+repos\s+pr\s+checkout\s+(.+)$/i;
-const CHANGE_REQUEST_REFERENCE =
-  /^https:\/\/(?:dev\.azure\.com\/[^/\s]+\/[^/\s]+|[^/\s]+\.visualstudio\.com\/(?:DefaultCollection\/)?[^/\s]+)\/_git\/[^/\s]+\/pullrequest\/(\d+)(?:[/?#].*)?$/i;
+const REMOTE_GIT_ROUTE = /\/_git\/[^/]+\/?$/u;
+
+/** Azure DevOps Services, which `az` reads; any other `_git` host is an Azure DevOps Server. */
+export function isAzureDevOpsServicesHost(hostname: string): boolean {
+  return (
+    hostname === "dev.azure.com" ||
+    hostname.endsWith(".dev.azure.com") ||
+    hostname.endsWith(".visualstudio.com")
+  );
+}
 
 /**
  * Azure alone addresses one repository under two names that share no part: `ssh.dev.azure.com` and
@@ -47,6 +62,21 @@ function canonicalRepositoryKey(key: string): string | null {
   return canonical.startsWith("dev.azure.com/") ? canonical : null;
 }
 
+/**
+ * `host/organization` for `host/organization/project/_git/repository`, and the server's collection
+ * path for an Azure DevOps Server. Null for the short `collection/_git/repository` form. Under a
+ * virtual directory that form still reads as one, so the provider checks the fetched repository.
+ */
+function organizationOfKey(key: string): string | null {
+  const parts = key.split("/");
+  const route = parts.indexOf("_git");
+  return route < 3 ? null : parts.slice(0, route - 1).join("/");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function decodeUrlPathSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -65,6 +95,30 @@ function checkoutCommandId(args: string): string | null {
 }
 
 const KIND = SourceControlProviderKind.make("azure-devops");
+
+export const settings = makeProviderSettingsSchema(
+  {
+    serverUrl: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Azure DevOps Server URL",
+        description:
+          "A self-hosted Azure DevOps Server (TFS). The token is sent to this server only. Azure DevOps Services uses Azure CLI instead.",
+        providerSettingsForm: { placeholder: "https://tfs.example.com" },
+      }),
+    ),
+    serverToken: SettingsSecretValue.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Personal access token",
+        description: "Created on that server, with Code read & write.",
+        providerSettingsForm: { control: "password" },
+      }),
+    ),
+  },
+  { order: ["serverUrl", "serverToken"] },
+);
+export type AzureDevOpsSettings = typeof settings.Type;
 
 export const definition = defineSourceControl({
   kind: KIND,
@@ -112,28 +166,61 @@ export const definition = defineSourceControl({
     "enable-auto-merge",
     "disable-auto-merge",
   ] as const),
-  checkoutCommand: ({ number }) => `az repos pr checkout --id ${number}`,
+  checkoutCommand: ({ number, headBranch, repositoryUrl, host }) => {
+    const url = repositoryUrl ? URL.parse(repositoryUrl) : null;
+    const hostname = url?.hostname ?? host?.replace(/:\d+$/u, "").toLowerCase();
+    if (!hostname || isAzureDevOpsServicesHost(hostname)) {
+      return `az repos pr checkout --id ${number}`;
+    }
+    // `az` refuses an Azure DevOps Server, so its checkout is plain git.
+    return url && headBranch
+      ? `git fetch ${shellQuote(url.href)} ${shellQuote(`refs/heads/${headBranch}`)} && git checkout -B pr/${number} FETCH_HEAD`
+      : null;
+  },
   // Completing or abandoning is a status change, the same `update` this package runs.
   changeRequestCloseCommand:
     /\baz\s+repos\s+pr\s+update\b[^;&|]*--status[\s=]+["']?(?:completed|abandoned)\b/u,
   authorProfileUrl: () => null,
+  repositoryLabel: (path) => {
+    const parts = path.split("/").filter((part) => part.length > 0);
+    const route = parts.indexOf("_git");
+    const project = parts[route - 1];
+    const repository = parts[route + 1];
+    return route < 1 || project === undefined || repository === undefined
+      ? null
+      : `${decodeUrlPathSegment(project)}/${decodeUrlPathSegment(repository)}`;
+  },
   hardLineBreaks: true,
   reviewSummaryRequired: () => false,
   checkoutCommandArgument: (input) => {
     const args = CHECKOUT_COMMAND.exec(input)?.[1];
     return args ? checkoutCommandId(args) : null;
   },
-  isChangeRequestReference: (url) => CHANGE_REQUEST_REFERENCE.test(url),
+  isChangeRequestReference: (url) => {
+    const parsed = URL.parse(url);
+    // A default Azure DevOps Server install serves plain http.
+    const webLink =
+      parsed?.protocol === "https:" ||
+      (parsed?.protocol === "http:" && !isAzureDevOpsServicesHost(parsed.hostname));
+    return webLink && parseChangeRequestPath(parsed, CHANGE_REQUEST_PATH) !== null;
+  },
   checkoutChangeRequestHost: () => null,
   // `ssh.dev.azure.com` is the default SSH clone host (git@ssh.dev.azure.com:v3/org/project/repo),
   // so any `*.dev.azure.com` subdomain is Azure. Legacy hosts stay under `.visualstudio.com`,
-  // including `vs-ssh.visualstudio.com`.
-  recognizeRemote: ({ host, hostname }) =>
-    hostname === "dev.azure.com" ||
-    hostname.endsWith(".dev.azure.com") ||
-    hostname.endsWith(".visualstudio.com")
-      ? { kind: KIND, name: "Azure DevOps", baseUrl: `https://${host}` }
-      : null,
+  // including `vs-ssh.visualstudio.com`. A server on any other hostname is known by its `_git` route.
+  recognizeRemote: ({ remoteUrl, host, hostname }) => {
+    if (isAzureDevOpsServicesHost(hostname)) {
+      return { kind: KIND, name: "Azure DevOps", baseUrl: `https://${host}` };
+    }
+    const url = URL.parse(remoteUrl);
+    if (!REMOTE_GIT_ROUTE.test(url?.pathname ?? remoteUrl)) return null;
+    return {
+      kind: KIND,
+      name: "Azure DevOps Server",
+      baseUrl:
+        url?.protocol === "http:" || url?.protocol === "https:" ? url.origin : `https://${host}`,
+    };
+  },
   /**
    * `az repos pr list --repository` takes a name; organisation and project come from checkout.
    * Decode the remote URL's name segment: `az` treats escapes literally and returns 404.
@@ -154,5 +241,17 @@ export const definition = defineSourceControl({
       (canonicalRepositoryKey(linkKey) ?? linkKey)
     );
   },
-  canReadChangeRequestOnHost: () => false,
+  // Pull request numbers are unique across an organization or collection, which any of its
+  // checkouts can read; another organization on the same host is another account's.
+  canReadChangeRequestOnHost: (identity, link) => {
+    if (!isChangeRequestAuthorityOfProject(identity, link)) return false;
+    const projectKey = identity.canonicalKey.toLowerCase();
+    const linkKey = `${link.host}/${link.repository}`.toLowerCase();
+    const organization = organizationOfKey(canonicalRepositoryKey(projectKey) ?? projectKey);
+    return (
+      organization !== null &&
+      organization === organizationOfKey(canonicalRepositoryKey(linkKey) ?? linkKey)
+    );
+  },
+  settings,
 });

@@ -1023,6 +1023,36 @@ export const make = Effect.gen(function* () {
                   candidate.repository.toLowerCase() === repository.toLowerCase(),
               ) ??
               onHost.find((candidate) => candidate.repositoryKey === null);
+            // A host that keys checkouts by repository lends one only where its definition says
+            // that checkout reads the change request, such as within one Azure organization.
+            const lent =
+              route === undefined
+                ? supported.find((candidate) => {
+                    const identity = candidate.project.repositoryIdentity;
+                    return (
+                      candidate.repositoryKey !== null &&
+                      identity != null &&
+                      sourceControlDefinitions
+                        .get(candidate.api.kind)
+                        .canReadChangeRequestOnHost(identity, {
+                          host,
+                          repository,
+                          number: ref.number,
+                        })
+                    );
+                  })
+                : undefined;
+            if (lent !== undefined) {
+              return Effect.succeed({
+                ...lent,
+                host,
+                repository,
+                remote: sourceControlDefinitions.repositoryKeyFromRemote(
+                  `https://${host}/${repository}`,
+                ),
+                repositoryKey,
+              });
+            }
             if (route === undefined) {
               return Effect.gen(function* () {
                 const publicHost = sourceControlDefinitions.findByPublicHost(host);

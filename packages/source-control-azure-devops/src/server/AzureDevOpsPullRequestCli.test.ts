@@ -3,7 +3,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ChildProcessSpawner } from "effect/process";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
+
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
+import { AzureDevOpsServerApi } from "./AzureDevOpsServerApi.ts";
 import * as AzureDevOpsPullRequestCli from "./AzureDevOpsPullRequestCli.ts";
 import * as AzureDevOpsPullRequestProvider from "./AzureDevOpsPullRequestProvider.ts";
 
@@ -12,9 +16,12 @@ const mockedExecute = vi.fn<AzureDevOpsCli.AzureDevOpsCli["Service"]["execute"]>
 const layer = it.layer(
   AzureDevOpsPullRequestCli.layer.pipe(
     Layer.provide(
-      Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({
-        execute: mockedExecute,
-      }),
+      Layer.mergeAll(
+        Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({ execute: mockedExecute }),
+        Layer.mock(AzureDevOpsServerApi)({ resolve: () => Effect.succeed(null) }),
+        TestSourceControlHost.layer(),
+        NodeServices.layer,
+      ),
     ),
   ),
 );

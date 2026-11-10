@@ -108,6 +108,93 @@ describe("Azure DevOps change request URLs", () => {
   });
 });
 
+describe("Azure DevOps links to another repository", () => {
+  const identityOf = (canonicalKey: string, remoteUrl: string): ChangeRequestProjectIdentity => ({
+    canonicalKey,
+    locator: { source: "git-remote", remoteName: "origin", remoteUrl },
+  });
+
+  it.each([
+    [
+      "an Azure DevOps Server collection",
+      identityOf(
+        "tfs.example/contoso/shared/_git/portal",
+        "https://tfs.example/Contoso/Shared/_git/Portal",
+      ),
+      "https://tfs.example/Contoso/Other/_git/Setup/pullrequest/9",
+      "https://tfs.example/Billing/Shared/_git/Setup/pullrequest/9",
+    ],
+    [
+      "an organization",
+      identityOf(
+        "dev.azure.com/org-a/project/_git/web",
+        "git@ssh.dev.azure.com:v3/org-a/project/web",
+      ),
+      "https://org-a.visualstudio.com/other/_git/api/pullrequest/9",
+      "https://dev.azure.com/org-b/project/_git/api/pullrequest/9",
+    ],
+  ])("reads within %s and nowhere else on its host", (_, identity, inside, outside) => {
+    expect(definition.canReadChangeRequestOnHost(identity, parse(inside)!)).toBe(true);
+    expect(definition.canReadChangeRequestOnHost(identity, parse(outside)!)).toBe(false);
+  });
+
+  it("lends nothing from the short form, which names no collection apart", () => {
+    const identity = identityOf(
+      "tfs.example/portal/_git/portal",
+      "https://tfs.example/Portal/_git/Portal",
+    );
+    expect(
+      definition.canReadChangeRequestOnHost(
+        identity,
+        parse("https://tfs.example/Other/_git/Other/pullrequest/9")!,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("Azure DevOps presentation", () => {
+  const registry = makeSourceControlDefinitionRegistry([definition]);
+
+  it("labels a repository as project/repository, in the URL's case where there is one", () => {
+    expect(registry.repositoryLabel("contoso%20apps/shared%20tools/_git/buildscripts")).toBe(
+      "shared tools/buildscripts",
+    );
+    expect(
+      registry.repositoryLabel(
+        "contoso%20apps/shared%20tools/_git/buildscripts",
+        "https://tfs.example/Contoso%20Apps/Shared%20Tools/_git/BuildScripts/pullrequest/4821",
+      ),
+    ).toBe("Shared Tools/BuildScripts");
+    expect(registry.repositoryLabel("web")).toBe("web");
+  });
+
+  it("checks out with az on Azure DevOps Services and with git on a server", () => {
+    expect(
+      definition.checkoutCommand({
+        number: 7,
+        headBranch: "feat/page",
+        repositoryUrl: "https://dev.azure.com/acme/web/_git/web",
+      }),
+    ).toBe("az repos pr checkout --id 7");
+    expect(
+      definition.checkoutCommand({
+        number: 4821,
+        headBranch: "feat/it's",
+        repositoryUrl: "https://tfs.example/Contoso%20Apps/Shared/_git/Build",
+      }),
+    ).toBe(
+      "git fetch 'https://tfs.example/Contoso%20Apps/Shared/_git/Build' 'refs/heads/feat/it'\\''s' && git checkout -B pr/4821 FETCH_HEAD",
+    );
+    // Before the branch is known a server's command is unknown too, not az's.
+    expect(definition.checkoutCommand({ number: 4821, headBranch: "", host: "tfs.example" })).toBe(
+      null,
+    );
+    expect(definition.checkoutCommand({ number: 7, headBranch: "", host: "dev.azure.com" })).toBe(
+      "az repos pr checkout --id 7",
+    );
+  });
+});
+
 describe("Azure DevOps remotes", () => {
   it("recognises the SSH clone hosts as well as the web ones", () => {
     for (const remote of [
@@ -118,7 +205,39 @@ describe("Azure DevOps remotes", () => {
     ]) {
       expect(recognizeRemoteWith(definition, remote)?.kind, remote).toBe("azure-devops");
     }
-    expect(recognizeRemoteWith(definition, "https://azure.example/o/p/_git/r")).toBeNull();
+  });
+
+  it("recognises an Azure DevOps Server on any hostname by its _git route", () => {
+    for (const [remote, baseUrl] of [
+      ["https://tfs.example/Collection/Project/_git/Repo", "https://tfs.example"],
+      ["http://tfs.example:8080/tfs/Collection/Project/_git/Repo", "http://tfs.example:8080"],
+      ["ssh://tfs.example:22/Collection/Project/_git/Repo", "https://tfs.example"],
+      ["git@tfs.example:Collection/Project/_git/Repo", "https://tfs.example"],
+    ] as const) {
+      expect(recognizeRemoteWith(definition, remote), remote).toEqual({
+        kind: "azure-devops",
+        name: "Azure DevOps Server",
+        baseUrl,
+      });
+    }
+    expect(recognizeRemoteWith(definition, "https://git.example/o/_git")).toBeNull();
+    expect(recognizeRemoteWith(definition, "https://git.example/o/r.git")).toBeNull();
+  });
+
+  it("accepts a pasted pull request link from any Azure DevOps host", () => {
+    for (const url of [
+      "https://dev.azure.com/acme/platform/_git/web/pullrequest/17",
+      "https://tfs.example/Contoso%20Apps/Shared%20Tools/_git/web/pullrequest/4821",
+      "http://tfs01:8080/tfs/DefaultCollection/Portal/_git/web/pullrequest/5",
+    ]) {
+      expect(definition.isChangeRequestReference(url), url).toBe(true);
+    }
+    for (const url of [
+      "https://tfs.example/c/p/_git/web",
+      "http://dev.azure.com/acme/platform/_git/web/pullrequest/17",
+    ]) {
+      expect(definition.isChangeRequestReference(url), url).toBe(false);
+    }
   });
 });
 

@@ -110,6 +110,7 @@ function LinkRowImpl({
   const snapshot = link.snapshot;
   const open = snapshot === null || snapshot.state === "open";
   const watching = link.watch !== undefined;
+  const repository = sourceControlClients.repositoryLabel(link.repository, link.url);
   const linkHost =
     sourceControlClients.findByChangeRequestUrl(link.url) ?? UNKNOWN_SOURCE_CONTROL_CLIENT;
   const linkHostActions = linkHost.changeRequestActions;
@@ -187,7 +188,7 @@ function LinkRowImpl({
               </TooltipPopup>
             </Tooltip>
           }
-          title={snapshot?.title ?? link.repository}
+          title={snapshot?.title ?? repository}
           signals={
             open ? (
               <>
@@ -261,15 +262,15 @@ function LinkRowImpl({
                 <>
                   <Tooltip>
                     <TooltipTrigger render={<span className="flex min-w-0 max-w-32 font-mono" />}>
-                      <MiddleTruncate value={link.repository} showTitle={false} />
+                      <MiddleTruncate value={repository} showTitle={false} />
                     </TooltipTrigger>
-                    <TooltipPopup>{link.repository}</TooltipPopup>
+                    <TooltipPopup>{repository}</TooltipPopup>
                   </Tooltip>
                   <PullRequestRowBranches head={snapshot.headBranch} base={snapshot.baseBranch} />
                 </>
               ) : (
                 <span className="truncate font-mono">
-                  {link.host}/{link.repository}
+                  {link.host}/{repository}
                 </span>
               )}
             </>

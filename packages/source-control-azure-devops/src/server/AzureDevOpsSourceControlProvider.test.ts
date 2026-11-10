@@ -10,6 +10,7 @@ import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
+import { AzureDevOpsServerApi } from "./AzureDevOpsServerApi.ts";
 import * as AzureDevOpsSourceControlProvider from "./AzureDevOpsSourceControlProvider.ts";
 
 const { parseAuth } = AzureDevOpsSourceControlProvider.discovery;
@@ -50,6 +51,7 @@ it.effect("names the remote's repository when reading the default branch", () =>
   const support = Layer.mergeAll(
     TestSourceControlHost.layer({ process: { run } }),
     NodeServices.layer,
+    Layer.mock(AzureDevOpsServerApi)({ resolve: () => Effect.succeed(null) }),
   );
   return Effect.gen(function* () {
     const provider = yield* AzureDevOpsSourceControlProvider.make;

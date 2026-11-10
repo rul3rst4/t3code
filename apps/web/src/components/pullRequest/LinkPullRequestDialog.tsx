@@ -3,6 +3,7 @@ import {
   pullRequestLinkProject,
   resolveLinkPullRequestInput,
 } from "@t3tools/client-runtime/pull-request-link-input";
+import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { useAtomValue } from "@effect/atom-react";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useRef, useState } from "react";
@@ -146,7 +147,8 @@ function LinkPullRequestDialog({
           />
           {resolved !== null && "link" in resolved ? (
             <p className="truncate text-muted-foreground text-xs">
-              {resolved.link.host}/{resolved.link.repository} #{resolved.link.number}
+              {resolved.link.host}/{sourceControlClients.repositoryLabel(resolved.link.repository)}{" "}
+              #{resolved.link.number}
             </p>
           ) : null}
           {(validation ?? submitError) ? (

@@ -142,7 +142,7 @@ export function PullRequestReviewSheet({
   return (
     <SheetContent
       title={reviewing ? "Submit review" : "Add comment"}
-      subtitle={`#${params.number}${reviewing && result.data?.headSha ? ` · reviewing ${result.data.headSha.slice(0, 7)}` : ` · ${params.repository}`}`}
+      subtitle={`#${params.number}${reviewing && result.data?.headSha ? ` · reviewing ${result.data.headSha.slice(0, 7)}` : ` · ${sourceControlClients.repositoryLabel(params.repository)}`}`}
       busy={submission.busy}
       footer={
         <Button

@@ -400,6 +400,7 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
   const summary = params.initialSummary;
   const identity = pr ?? summary;
   const terminology = sourceControlClients.get(identity?.provider).changeRequest;
+  const repository = sourceControlClients.repositoryLabel(params.repository, identity?.url);
   const permissions = usePullRequestPermissions(params, pr);
   const description = usePullRequestDescription(params, pr, permissions.canEditChangeRequest);
   const action = usePullRequestAction(params, pr);
@@ -464,7 +465,7 @@ export function PullRequestRouteScreen({ route }: StaticScreenProps<PullRequestP
       <View className="flex-1 android:bg-header ios:bg-screen">
         <AppBar
           title={`#${params.number}`}
-          subtitle={connected ? params.repository : `${params.repository} · Offline`}
+          subtitle={connected ? repository : `${repository} · Offline`}
           onBack={layout.usesSplitView ? undefined : returnToList}
           menus={[
             {

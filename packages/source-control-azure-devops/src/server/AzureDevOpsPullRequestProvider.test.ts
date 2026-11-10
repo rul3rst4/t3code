@@ -123,6 +123,44 @@ function patchedPaths(patch: string): ReadonlyArray<string> {
 }
 
 describe("getChangeRequest", () => {
+  it.effect("reads and writes through a lent checkout only the linked repository's number", () =>
+    Effect.gen(function* () {
+      const writes: number[] = [];
+      const provider = yield* make.pipe(
+        Effect.provide(
+          Layer.mock(AzureDevOpsPullRequestCli.AzureDevOpsPullRequestCli)({
+            getPullRequest: () =>
+              Effect.succeed({
+                ...PULL_REQUEST,
+                url: "https://tfs.example/tfs/Contoso/_git/Portal%20(EU)/pullrequest/7",
+              }),
+            runPullRequestAction: (input) => Effect.sync(() => void writes.push(input.number)),
+          }),
+        ),
+      );
+      const summarize = provider.getChangeRequestSummary;
+      if (summarize === undefined) return expect.unreachable("Azure reads summaries");
+      const at = (repository: string) => ({
+        cwd: "/w",
+        repository,
+        host: "tfs.example",
+        number: 7,
+      });
+
+      const linked = yield* summarize(at("tfs/contoso/_git/portal%20(eu)"));
+      expect(linked.number).toBe(7);
+      // The same repository under the collection's other spelling.
+      yield* summarize(at("tfs/DefaultCollection/Contoso/_git/Portal%20(EU)"));
+      yield* provider.runAction({ ...at("tfs/contoso/_git/portal (eu)"), action: "close" });
+
+      const elsewhere = at("tfs/billing/_git/portal");
+      const read = yield* Effect.flip(summarize(elsewhere));
+      const write = yield* Effect.flip(provider.runAction({ ...elsewhere, action: "close" }));
+      expect([read.reason, write.reason]).toEqual(["not-found", "not-found"]);
+      expect(writes).toEqual([7]);
+    }),
+  );
+
   it.effect("preserves the newest head when file counting fails", () =>
     Effect.gen(function* () {
       const provider = yield* make.pipe(

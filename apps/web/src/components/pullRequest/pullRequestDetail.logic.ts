@@ -132,7 +132,11 @@ export function loadingPullRequestCheckoutCommand(
     : host
       ? sourceControlClients.findByPublicHost(host)
       : undefined;
-  const command = definition?.checkoutCommand({ number: reference.number, headBranch: "" });
+  const command = definition?.checkoutCommand({
+    number: reference.number,
+    headBranch: "",
+    host: reference.host,
+  });
   if (!definition || !command) return null;
   if (
     identity?.provider !== undefined &&

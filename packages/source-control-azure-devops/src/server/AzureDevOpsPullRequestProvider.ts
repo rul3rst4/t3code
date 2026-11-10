@@ -64,8 +64,9 @@ const CAPABILITIES: PullRequestCapabilities = {
 
 const UNAVAILABLE_REQUIREMENT = {
   missing:
-    "Azure CLI (`az`) with the Azure DevOps extension is required. Install `az`, then run `az extension add --name azure-devops`.",
-  unauthenticated: "Azure CLI is not signed in. Run `az login` and retry.",
+    "Azure DevOps Services needs Azure CLI (`az`) with the Azure DevOps extension: install `az`, then run `az extension add --name azure-devops`. An Azure DevOps Server needs its URL and a personal access token in Settings › Source control.",
+  unauthenticated:
+    "Azure DevOps refused the credentials. For Azure DevOps Services run `az login`; for an Azure DevOps Server replace the token in Settings › Source control.",
 };
 
 /**
@@ -87,8 +88,42 @@ function azureDevOpsProviderFailure(
   if (error._tag === "AzureDevOpsCliUnavailableError") return { reason: "missing-tool" };
   if (error._tag === "AzureDevOpsCliAuthenticationError") return { reason: "unauthenticated" };
   if (error._tag === "AzureDevOpsCliRateLimitError") return { reason: "rate-limited" };
-  if (error._tag === "AzureDevOpsPullRequestNotFoundError") return { reason: "not-found" };
+  if (
+    error._tag === "AzureDevOpsPullRequestNotFoundError" ||
+    error._tag === "AzureDevOpsPullRequestElsewhereError"
+  ) {
+    return { reason: "not-found" };
+  }
+  if (error._tag === "AzureDevOpsServerError") {
+    switch (error.reason) {
+      case "missing-token":
+        return { reason: "missing-tool" };
+      case "unauthenticated":
+      case "rate-limited":
+      case "not-found":
+        return { reason: error.reason };
+      case "failed":
+        return { reason: "failed" };
+    }
+  }
   return { reason: "failed" };
+}
+
+interface PullRequestInput {
+  readonly cwd: string;
+  readonly repository: string;
+  readonly number: number;
+}
+
+/** A checkout's own repository is named bare; a link's is its `…/_git/repo` path. */
+function isLinkedRepository(repository: string, pullRequestUrl: string): boolean {
+  if (!repository.includes("/_git/")) return true;
+  const url = URL.parse(pullRequestUrl);
+  const link = url === null ? null : definition.parseChangeRequestUrl(url);
+  // Within one organization `project/repository` names it under every host spelling.
+  const label = (path: string) => definition.repositoryLabel?.(path)?.toLowerCase() ?? null;
+  const linked = label(repository);
+  return link !== null && linked !== null && label(link.repository) === linked;
 }
 
 function toChangeRequest(pullRequest: AzureDevOpsPullRequest): ProviderChangeRequest {
@@ -160,18 +195,38 @@ export const make = Effect.gen(function* () {
 
   const EMPTY_DIFF_SLICE: ProviderDiffSlice = { patch: "", truncated: false, nextCursor: null };
 
+  /**
+   * A checkout lent to a link reads by number across its organization or collection, which a link
+   * cannot always name apart. A pull request from another repository is not the one it links.
+   */
+  const pullRequestFor = (input: PullRequestInput) =>
+    cli.getPullRequest({ cwd: input.cwd, number: input.number }).pipe(
+      Effect.filterOrFail(
+        (pullRequest) => isLinkedRepository(input.repository, pullRequest.url),
+        () =>
+          new AzureDevOpsPullRequestCli.AzureDevOpsPullRequestElsewhereError({
+            cwd: input.cwd,
+            number: input.number,
+          }),
+      ),
+    );
+
+  /** A write through a lent checkout first proves the pull request is the linked one. */
+  const verified = (input: PullRequestInput) =>
+    input.repository.includes("/_git/") ? Effect.asVoid(pullRequestFor(input)) : Effect.void;
+
   // PR locations are immutable; caching avoids full PR reads for viewed-file checks.
   const locations = new Map<string, AzureDevOpsRepositoryLocation>();
 
-  const locationOf = (input: { readonly cwd: string; readonly number: number }) => {
-    const key = `${input.cwd} ${input.number}`;
+  const locationOf = (input: PullRequestInput) => {
+    const key = `${input.cwd} ${input.repository} ${input.number}`;
     const held = locations.get(key);
     if (held !== undefined) {
       locations.delete(key);
       locations.set(key, held);
       return Effect.succeed(held);
     }
-    return cli.getPullRequest({ cwd: input.cwd, number: input.number }).pipe(
+    return pullRequestFor(input).pipe(
       Effect.map((pullRequest) => {
         const location = pullRequest.location;
         if (location === null) return null;
@@ -185,10 +240,9 @@ export const make = Effect.gen(function* () {
     );
   };
 
-  const diffScope = Effect.fn("AzureDevOpsPullRequestProvider.diffScope")(function* (input: {
-    readonly cwd: string;
-    readonly number: number;
-  }) {
+  const diffScope = Effect.fn("AzureDevOpsPullRequestProvider.diffScope")(function* (
+    input: PullRequestInput,
+  ) {
     const location = yield* locationOf(input);
     if (location === null) return null;
     const iterations = yield* cli.listIterations({
@@ -294,7 +348,7 @@ export const make = Effect.gen(function* () {
         ),
 
     getChangeRequestPreview: (input) =>
-      cli.getPullRequest({ cwd: input.cwd, number: input.number }).pipe(
+      pullRequestFor(input).pipe(
         Effect.mapError(fail("getChangeRequestPreview")),
         Effect.map((pullRequest) => ({
           number: pullRequest.number,
@@ -308,13 +362,14 @@ export const make = Effect.gen(function* () {
       ),
 
     getChangeRequestSummary: (input) =>
-      cli
-        .getPullRequest({ cwd: input.cwd, number: input.number })
-        .pipe(Effect.mapError(fail("getChangeRequestSummary")), Effect.map(toSummary)),
+      pullRequestFor(input).pipe(
+        Effect.mapError(fail("getChangeRequestSummary")),
+        Effect.map(toSummary),
+      ),
 
     getChangeRequest: Effect.fn("AzureDevOpsPullRequestProvider.getChangeRequest")(
       function* (input) {
-        const pullRequest = yield* cli.getPullRequest({ cwd: input.cwd, number: input.number });
+        const pullRequest = yield* pullRequestFor(input);
         const location = pullRequest.location;
         const iterations =
           location === null
@@ -358,7 +413,7 @@ export const make = Effect.gen(function* () {
     ),
 
     getChangeRequestActivity: (input) =>
-      cli.getPullRequest({ cwd: input.cwd, number: input.number }).pipe(
+      pullRequestFor(input).pipe(
         Effect.mapError(fail("getChangeRequestActivity")),
         Effect.flatMap((pullRequest) =>
           (pullRequest.location === null
@@ -439,6 +494,10 @@ export const make = Effect.gen(function* () {
                   AzureDevOpsPullRequestNotFoundError: () => Effect.succeed(null),
                   AzureDevOpsCommandFailedError: () => Effect.succeed(null),
                   AzureDevOpsPullRequestReadError: () => Effect.succeed(null),
+                  AzureDevOpsServerError: (error) =>
+                    error.reason === "not-found" || error.reason === "failed"
+                      ? Effect.succeed(null)
+                      : Effect.fail(error),
                 }),
                 Effect.map((texts) => ({ change, texts })),
               ),
@@ -533,36 +592,40 @@ export const make = Effect.gen(function* () {
     ),
 
     runAction: (input) =>
-      cli
-        .runPullRequestAction({
-          cwd: input.cwd,
-          number: input.number,
-          action: input.action,
-          ...(input.mergeMethod === undefined ? {} : { mergeMethod: input.mergeMethod }),
-        })
-        .pipe(
-          Effect.mapError(fail("runAction")),
-          Effect.map(
-            (pullRequest) =>
-              pullRequest && {
-                ...toSummary(pullRequest),
-                autoMergeEnabled: pullRequest.autoMergeEnabled,
-                ...(pullRequest.autoMergeMethod === undefined
-                  ? {}
-                  : { autoMergeMethod: pullRequest.autoMergeMethod }),
-              },
-          ),
+      verified(input).pipe(
+        Effect.andThen(
+          cli.runPullRequestAction({
+            cwd: input.cwd,
+            number: input.number,
+            action: input.action,
+            ...(input.mergeMethod === undefined ? {} : { mergeMethod: input.mergeMethod }),
+          }),
         ),
+        Effect.mapError(fail("runAction")),
+        Effect.map(
+          (pullRequest) =>
+            pullRequest && {
+              ...toSummary(pullRequest),
+              autoMergeEnabled: pullRequest.autoMergeEnabled,
+              ...(pullRequest.autoMergeMethod === undefined
+                ? {}
+                : { autoMergeMethod: pullRequest.autoMergeMethod }),
+            },
+        ),
+      ),
 
     updateChangeRequest: (input) =>
-      cli
-        .updatePullRequest({
-          cwd: input.cwd,
-          number: input.number,
-          title: input.title,
-          body: input.body,
-        })
-        .pipe(Effect.mapError(fail("updateChangeRequest"))),
+      verified(input).pipe(
+        Effect.andThen(
+          cli.updatePullRequest({
+            cwd: input.cwd,
+            number: input.number,
+            title: input.title,
+            body: input.body,
+          }),
+        ),
+        Effect.mapError(fail("updateChangeRequest")),
+      ),
 
     listReviewerCandidates: () =>
       Effect.fail(
@@ -575,14 +638,17 @@ export const make = Effect.gen(function* () {
       ),
 
     setReviewerRequest: (input) =>
-      cli
-        .setPullRequestReviewers({
-          cwd: input.cwd,
-          number: input.number,
-          reviewers: input.reviewers.map((reviewer) => reviewer.id),
-          requested: input.requested,
-        })
-        .pipe(Effect.mapError(fail("setReviewerRequest"))),
+      verified(input).pipe(
+        Effect.andThen(
+          cli.setPullRequestReviewers({
+            cwd: input.cwd,
+            number: input.number,
+            reviewers: input.reviewers.map((reviewer) => reviewer.id),
+            requested: input.requested,
+          }),
+        ),
+        Effect.mapError(fail("setReviewerRequest")),
+      ),
 
     comment: () => unsupported("comment"),
 

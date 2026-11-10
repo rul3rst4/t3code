@@ -144,7 +144,7 @@ export function PullRequestReviewersScreen({ route }: StaticScreenProps<PullRequ
     <View className="flex-1 bg-sheet">
       <AppBar
         title="Request review"
-        subtitle={`#${route.params.number} · ${route.params.repository}`}
+        subtitle={`#${route.params.number} · ${sourceControlClients.repositoryLabel(route.params.repository)}`}
         onClose={() => navigation.goBack()}
         closeAccessibilityLabel="Close request review"
         search={reviewerSearch}

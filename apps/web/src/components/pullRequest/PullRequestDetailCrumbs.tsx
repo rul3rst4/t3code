@@ -110,6 +110,8 @@ export function PullRequestDetailCrumbs({
   onBack: (() => void) | undefined;
 }) {
   const ready = detail !== null && toneClassName !== null;
+  const repository =
+    detail === null ? null : sourceControlClients.repositoryLabel(detail.repository, detail.url);
   return (
     <div className="pl-4 grid h-7 min-w-0 items-center overflow-hidden">
       <div
@@ -134,17 +136,17 @@ export function PullRequestDetailCrumbs({
                       onClick={() => void readLocalApi()?.shell.openExternal(repositoryUrl)}
                       className="min-w-0 cursor-pointer truncate text-left font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                     >
-                      {detail.repository}
+                      {repository}
                     </button>
                   ) : (
                     <span className="min-w-0 truncate font-medium text-muted-foreground">
-                      {detail.repository}
+                      {repository}
                     </span>
                   )
                 }
               />
               <TooltipPopup side="top">
-                {repositoryUrl ? `Open ${detail.repository} repository` : detail.repository}
+                {repositoryUrl ? `Open ${repository} repository` : repository}
               </TooltipPopup>
             </Tooltip>
             <NumberLink

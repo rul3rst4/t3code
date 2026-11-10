@@ -413,7 +413,7 @@ export function PullRequestFilesSheet({ route }: StaticScreenProps<PullRequestDi
     <View collapsable={false} className="flex-1 bg-sheet">
       <SheetHeader
         title="Changed files"
-        subtitle={`#${params.number} · ${params.commit?.slice(0, 7) ?? params.repository}`}
+        subtitle={`#${params.number} · ${params.commit?.slice(0, 7) ?? sourceControlClients.repositoryLabel(params.repository)}`}
         onClose={() => navigation.goBack()}
         menus={[
           {

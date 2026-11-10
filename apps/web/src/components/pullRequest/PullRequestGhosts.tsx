@@ -150,7 +150,9 @@ export function PullRequestDetailGhost({
             ) : null}
             {seed ? (
               <>
-                <span className="min-w-0 truncate font-medium">{seed.repository}</span>
+                <span className="min-w-0 truncate font-medium">
+                  {sourceControlClients.repositoryLabel(seed.repository, seed.url)}
+                </span>
                 <InlineButton
                   onClick={() => void readLocalApi()?.shell.openExternal(seed.url)}
                   aria-label={`Open ${terminology.singular} #${seed.number} on host`}

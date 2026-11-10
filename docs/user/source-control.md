@@ -111,6 +111,12 @@ az extension add --name azure-devops
 az login
 ```
 
+Azure CLI reads only Azure DevOps Services. For a self-hosted Azure DevOps Server (TFS), open
+**Settings → Source control**, expand **Azure DevOps**, and enter the server's URL, such as
+`https://tfs.example.com`, and a personal access token with Code read & write created on that
+server. The token is sent to that server only, and projects whose remote is on it are read through
+it.
+
 ### GitCafe
 
 Install the GitCafe CLI and sign in:
@@ -335,8 +341,8 @@ A watched thread counts as working between wakes, so it stays in the **Working**
 not auto-settle. Agents stop watching when they hand the work back to you, and the thread then
 returns to your inbox.
 
-Cross-repository links use a project on the same host. Azure DevOps reviews require a project checked
-out from the matching organization and repository.
+Cross-repository links use a project on the same host. Azure DevOps links use a project checked out
+from the same organization, or the same collection on an Azure DevOps Server.
 
 ## GitHub stacks
 

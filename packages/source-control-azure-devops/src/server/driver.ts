@@ -9,10 +9,14 @@ import { definition } from "../shared/definition.ts";
 
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
 import * as AzureDevOpsPullRequestCli from "./AzureDevOpsPullRequestCli.ts";
+import * as AzureDevOpsServerApi from "./AzureDevOpsServerApi.ts";
 import * as AzureDevOpsPullRequestProvider from "./AzureDevOpsPullRequestProvider.ts";
 import * as AzureDevOpsSourceControlProvider from "./AzureDevOpsSourceControlProvider.ts";
 
-const services = AzureDevOpsPullRequestCli.layer.pipe(Layer.provideMerge(AzureDevOpsCli.layer));
+const services = AzureDevOpsPullRequestCli.layer.pipe(
+  Layer.provideMerge(AzureDevOpsCli.layer),
+  Layer.provideMerge(AzureDevOpsServerApi.layer),
+);
 
 const makeInstance = Effect.all({
   sourceControl: AzureDevOpsSourceControlProvider.make,

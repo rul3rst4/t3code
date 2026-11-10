@@ -93,6 +93,8 @@ export interface ChangeRequestCheckoutInput {
   readonly headBranch: string;
   readonly headRepositoryNameWithOwner?: string | null | undefined;
   readonly repositoryUrl?: string | null | undefined;
+  /** The change request's host, before its repository URL is known. */
+  readonly host?: string | null | undefined;
 }
 
 /** Media a host serves only to a request carrying a credential, as `mediaUrl` reads it. */
@@ -281,6 +283,11 @@ export interface SourceControlDefinition {
    */
   readonly changeRequestCreateCommand?: RegExp;
   readonly authorProfileUrl: (login: string, repositoryUrl: string) => string | null;
+  /**
+   * How a person reads a repository path this host spells for routing, such as Azure's
+   * `org/project/_git/repo`. Null leaves the path as it is.
+   */
+  readonly repositoryLabel?: (repositoryPath: string) => string | null;
   /**
    * The references this host's own renderer links in plain text, such as `#12` or a commit SHA,
    * resolved against `repositoryUrl`, in the order they appear. Absent for a host whose grammar
@@ -613,6 +620,11 @@ export interface SourceControlDefinitionRegistry {
   readonly parseCommitUrl: (url: string, kind?: SourceControlProviderKind) => ParsedCommit | null;
   readonly findByChangeRequestUrl: (url: string) => SourceControlDefinition | undefined;
   readonly hostLabelForChangeRequestUrl: (url: string) => string;
+  /**
+   * `repository` as a person reads it, from the change request's URL where one is known, since a
+   * routing key may be lower-cased.
+   */
+  readonly repositoryLabel: (repository: string, changeRequestUrl?: string | null) => string;
   readonly isSameChangeRequest: (left: string, right: string) => boolean;
   readonly changeRequestUrlFromReferenceAutolink: (url: string) => string | null;
   /**
@@ -723,6 +735,17 @@ export function makeSourceControlDefinitionRegistry(
     findByChangeRequestUrl: (url) => parseChangeRequestUrl(url)?.definition,
     hostLabelForChangeRequestUrl: (url) =>
       parseChangeRequestUrl(url)?.definition.label ?? "the host",
+    repositoryLabel: (repository, changeRequestUrl) => {
+      const repositoryUrl = changeRequestUrl
+        ? parseChangeRequestUrl(changeRequestUrl)?.link.repositoryUrl
+        : undefined;
+      const path = repositoryUrl ? new URL(repositoryUrl).pathname.slice(1) : repository;
+      for (const definition of definitions) {
+        const label = definition.repositoryLabel?.(path);
+        if (label != null) return label;
+      }
+      return repository;
+    },
     isSameChangeRequest: (left, right) => {
       const a = parseChangeRequestUrl(left)?.link;
       const b = parseChangeRequestUrl(right)?.link;

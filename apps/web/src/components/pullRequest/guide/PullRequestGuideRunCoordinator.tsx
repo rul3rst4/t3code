@@ -2,6 +2,7 @@ import type { AnyRouter } from "@tanstack/react-router";
 import type { PullRequestReviewGuideResult } from "@t3tools/contracts";
 import { CircleAlertIcon, CircleCheckIcon } from "lucide-react";
 import { AsyncResult, type AtomRegistry } from "effect/reactivity";
+import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 
 import { getClientSettings } from "~/hooks/useSettings";
 import { observedPullRequestTitle, pullRequestEnvironment } from "~/state/pullRequests";
@@ -93,7 +94,7 @@ function watchGuideRun(
     const body =
       watch.title ??
       observedPullRequestTitle(registry, watch.environmentId, watch.reference) ??
-      `${watch.reference.repository} #${watch.reference.number}`;
+      `${sourceControlClients.repositoryLabel(watch.reference.repository)} #${watch.reference.number}`;
     const open = () => {
       useGuideRunStore.getState().showPageDetailTab(runKey, "guide");
       void router.navigate({
